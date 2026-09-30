@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>問い合わせ詳細</title>
+  <style>
+    body { font-family: "Hiragino Sans", "Noto Sans JP", "Meiryo", sans-serif; color: #000; background: #fff; margin: 24px; }
+    .wrap { max-width: 640px; border: 1px solid #999; }
+    .header { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid #999; }
+    .header h1 { font-size: 18px; margin: 0; }
+    section { padding: 10px 14px; border-bottom: 1px solid #999; }
+    section:last-child { border-bottom: none; }
+    h2 { font-size: 15px; margin: 0 0 8px; }
+    dl { display: grid; grid-template-columns: 5em 1fr; gap: 4px 8px; margin: 0; }
+    dt::after { content: " ："; }
+    dd { margin: 0; white-space: pre-wrap; }
+    .row { margin: 6px 0; }
+    textarea { width: 100%; box-sizing: border-box; height: 60px; }
+    .msg { padding: 8px 14px; font-weight: bold; border-bottom: 1px solid #999; }
+    .msg-success { color: #1a7f37; background: #e6f4ea; }
+    .msg-error { color: #c62828; background: #fdecea; }
+    .priority-HIGH { color: #d00000; }
+    .priority-MIDDLE { color: #000000; }
+    .priority-LOW { color: #888888; }
+    .note { color: #555; font-size: 13px; }
+    .history-item { margin: 0 0 8px; }
+    .history-item .detail { padding-left: 1em; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <!-- ヘッダー -->
+  <div class="header">
+    <h1>問い合わせ詳細</h1>
+    <a href="/inquiries">[一覧に戻る]</a>
+  </div>
+
+  <!-- 処理結果メッセージ -->
+  <% if (flash) { %>
+    <div class="msg msg-<%= flash.type %>"><%= flash.text %></div>
+  <% } %>
+
+  <% if (inquiry) { %>
+  <!-- 基本情報 -->
+  <section>
+    <dl>
+      <dt>件名</dt><dd><%= inquiry.title %></dd>
+      <dt>依頼者</dt><dd><%= inquiry.requester_name %></dd>
+      <dt>優先度</dt><dd class="priority-<%= inquiry.priority %>"><%= priorityLabel %></dd>
+      <dt>登録日</dt><dd><%= createdAt %></dd>
+      <dt>本文</dt><dd><%= inquiry.body %></dd>
+    </dl>
+  </section>
+
+  <!-- ステータス変更(V-02:遷移先が無ければセクションごと非表示) -->
+  <% if (nextStatusList.length > 0) { %>
+  <section>
+    <h2>▼ ステータス変更</h2>
+    <form method="post" action="/inquiries/<%= inquiry.id %>/status">
+      <input type="hidden" name="updated_at" value="<%= inquiry.updated_at %>">
+      <div class="row">現在： [<%= statusLabels[inquiry.status] %>]</div>
+      <div class="row">変更先：
+        <% nextStatusList.forEach((code, i) => { %>
+          <label><input type="radio" name="status" value="<%= code %>" <%= i === 0 ? 'checked' : '' %>> <%= statusLabels[code] %></label>
+        <% }) %>
+      </div>
+      <div class="row">コメント（任意・200字以内）<br>
+        <textarea name="comment"></textarea>
+      </div>
+      <button type="submit">ステータスを変更</button>
+    </form>
+  </section>
+  <% } %>
+
+  <!-- 担当者割り当て -->
+  <section>
+    <h2>▼ 担当者割り当て</h2>
+    <form method="post" action="/inquiries/<%= inquiry.id %>/assignee">
+      <input type="hidden" name="updated_at" value="<%= inquiry.updated_at %>">
+      <div class="row">現在： <%= assigneeName %></div>
+      <div class="row">変更先：
+        <select name="assignee_id">
+          <% if (isAdmin) { %>
+            <option value="" <%= inquiry.assignee_id == null ? 'selected' : '' %>>未割り当て</option>
+          <% } %>
+          <% activeUsers.forEach((u) => { %>
+            <option value="<%= u.id %>" <%= u.id === inquiry.assignee_id ? 'selected' : '' %>><%= u.name %></option>
+          <% }) %>
+        </select>
+      </div>
+      <button type="submit" <%= assigneeButtonDisabled ? 'disabled' : '' %>>担当者を変更</button>
+      <% if (showAskAdmin) { %>
+        <div class="row note">担当者の変更は管理者に依頼してください</div>
+      <% } %>
+    </form>
+  </section>
+
+  <!-- 変更履歴 -->
+  <section>
+    <h2>▼ 変更履歴（新しい順・最大20件）</h2>
+    <% if (histories.length === 0) { %>
+      <div>変更履歴はありません</div>
+    <% } else { %>
+      <% histories.forEach((h) => { %>
+        <div class="history-item">
+          <div><%= h.changedAt %>　<%= h.operatorName %></div>
+          <div class="detail"><%= h.fieldLabel %>： <%= h.oldLabel %> → <%= h.newLabel %></div>
+        </div>
+      <% }) %>
+    <% } %>
+  </section>
+  <% } %>
+</div>
+</body>
+</html>
