@@ -18,7 +18,8 @@ app.get('/login', (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(Number(req.query.user_id));
   if (!user) return res.status(400).send('user_id が不正です。');
   res.cookie('user_id', String(user.id));
-  res.send(`${user.name}(${user.role})としてログインしました。`);
+  const note = user.is_active ? '' : '(無効ユーザーのため、閲覧のみ可能です)';
+  res.send(`${user.name}(${user.role})としてログインしました。${note}`);
 });
 
 const { createInquiryService } = require('./src/services/inquiryService');
@@ -48,23 +49,18 @@ function formatDateTime(value) {
   return `${date.replace(/-/g, '/')} ${time.slice(0, 5)}`;
 }
 
-// 問い合わせ詳細画面
-app.get('/inquiries/:id', (req, res) => {
-  // 処理結果メッセージを1回だけ表示
-  let flash = null;
-  if (req.cookies.flash) {
-    try { flash = JSON.parse(req.cookies.flash); } catch (e) { flash = null; }
-    res.clearCookie('flash');
-  }
-
+// 問い合わせ詳細画面の表示内容を組み立てる
+// form:エラー時に入力内容を画面へ戻すための値({ status, comment, assignee_id })
+function renderDetail(req, res, { flash = null, form = {} } = {}) {
   const inquiry = db.prepare('SELECT * FROM inquiries WHERE id = ?').get(Number(req.params.id));
   if (!inquiry) {
-    return res.render('detail', { inquiry: null, flash: { type: 'error', text: MESSAGES.NOT_FOUND } });
+    return res.render('detail', { inquiry: null, flash: flash || { type: 'error', text: MESSAGES.NOT_FOUND } });
   }
 
   const operator = currentUser(req);
-  const isAdmin = !!operator && operator.role === 'ADMIN';
-  const isMember = !!operator && operator.role === 'MEMBER';
+  const canOperate = service.isActiveOperator(operator); // 無効ユーザー・未ログインは変更操作不可
+  const isAdmin = canOperate && operator.role === 'ADMIN';
+  const isMember = canOperate && operator.role === 'MEMBER';
 
   const users = db.prepare('SELECT * FROM users').all();
   const userName = (id) => {
@@ -75,15 +71,41 @@ app.get('/inquiries/:id', (req, res) => {
 
   // V-01:遷移表で「○」の値のみ(canTransition を使用)
   const nextStatusList = Object.keys(STATUS_LABELS).filter((to) => canTransition(inquiry.status, to));
+  // エラー時は選んでいた変更先を保持。無ければ先頭を選択
+  const selectedStatus = nextStatusList.includes(form.status) ? form.status : nextStatusList[0];
 
   // V-03:有効ユーザーのみ、氏名の五十音順
   const activeUsers = users
     .filter((u) => u.is_active)
     .sort((a, b) => a.name.localeCompare(b.name, 'ja'));
 
+  // 担当者プルダウンの選択肢:実際に変更できる相手だけを表示する
+  //  ADMIN :有効ユーザー全員(+未割り当て)
+  //  MEMBER:未割り当てなら「自分」だけ/担当者設定済みなら変更不可のため現在の担当者だけ
+  //  無効ユーザー・未ログイン:変更不可のため現在の担当者だけ
+  let assigneeOptions;
+  if (isAdmin) {
+    assigneeOptions = activeUsers;
+  } else if (isMember && inquiry.assignee_id == null) {
+    assigneeOptions = activeUsers.filter((u) => u.id === operator.id);
+  } else {
+    assigneeOptions = users.filter((u) => u.id === inquiry.assignee_id);
+  }
+  // 「未割り当て」はADMINのみ(V-03)。操作不可の人には、現在値が未割り当てのときだけ表示用に出す
+  const showUnassignedOption = isAdmin || (!canOperate && inquiry.assignee_id == null);
+  let selectedAssignee;
+  if (form.assignee_id !== undefined) selectedAssignee = String(form.assignee_id);
+  else if (inquiry.assignee_id != null) selectedAssignee = String(inquiry.assignee_id);
+  else selectedAssignee = isMember ? String(operator.id) : '';
+
   // V-04 / V-05:担当者変更ボタンの非活性
   const showAskAdmin = isMember && inquiry.assignee_id != null;
-  const assigneeButtonDisabled = showAskAdmin || inquiry.status === 'DONE';
+  const assigneeButtonDisabled = !canOperate || showAskAdmin || inquiry.status === 'DONE';
+
+  // 操作できない理由(無効ユーザー・未ログイン)
+  let operatorNote = '';
+  if (!operator) operatorNote = '操作するユーザーが選ばれていないため、変更はできません。';
+  else if (!operator.is_active) operatorNote = 'このユーザーは無効のため、変更はできません(閲覧のみ)。';
 
   // 変更履歴:新しい順・最大20件
   const histories = db.prepare(`
@@ -102,21 +124,49 @@ app.get('/inquiries/:id', (req, res) => {
     };
   });
 
-  res.render('detail', {
+  return res.render('detail', {
     flash,
     inquiry,
     statusLabels: STATUS_LABELS,
     priorityLabel: PRIORITY_LABELS[inquiry.priority],
     createdAt: formatDateTime(inquiry.created_at),
     nextStatusList,
+    selectedStatus,
+    comment: form.comment || '',
+    commentMax: 200,
+    canOperate,
+    operatorNote,
     assigneeName: userName(inquiry.assignee_id),
-    isAdmin,
-    activeUsers,
+    showUnassignedOption,
+    assigneeOptions,
+    selectedAssignee,
     assigneeButtonDisabled,
     showAskAdmin,
     histories,
   });
+}
+
+// 問い合わせ詳細画面
+app.get('/inquiries/:id', (req, res) => {
+  // 処理結果メッセージを1回だけ表示
+  let flash = null;
+  if (req.cookies.flash) {
+    try { flash = JSON.parse(req.cookies.flash); } catch (e) { flash = null; }
+    res.clearCookie('flash');
+  }
+  renderDetail(req, res, { flash });
 });
+
+// 処理結果の返し方
+//  成功:詳細画面へリダイレクトし、メッセージを表示(再読み込みで二重送信しないため)
+//  失敗:入力内容(コメント・選択値)を残したまま、その場で詳細画面を表示
+function respond(req, res, result, form) {
+  if (result.ok) {
+    setFlash(res, result);
+    return res.redirect(`/inquiries/${req.params.id}`);
+  }
+  return renderDetail(req, res, { flash: { type: result.type, text: result.text }, form });
+}
 
 // ステータス変更
 app.post('/inquiries/:id/status', (req, res) => {
@@ -131,8 +181,7 @@ app.post('/inquiries/:id/status', (req, res) => {
         expectedUpdatedAt: req.body.updated_at,
       })
     : { ok: false, type: 'error', text: MESSAGES.NO_PERMISSION };
-  setFlash(res, result);
-  res.redirect(`/inquiries/${req.params.id}`);
+  respond(req, res, result, { status: req.body.status, comment: req.body.comment });
 });
 
 // 担当者変更(プルダウンの「未割り当て」は空文字で送られる)
@@ -144,8 +193,7 @@ app.post('/inquiries/:id/assignee', (req, res) => {
   const result = operator
     ? service.changeAssignee({ inquiryId, operator, assigneeId, expectedUpdatedAt: req.body.updated_at })
     : { ok: false, type: 'error', text: MESSAGES.NO_PERMISSION };
-  setFlash(res, result);
-  res.redirect(`/inquiries/${req.params.id}`);
+  respond(req, res, result, { assignee_id: raw === undefined ? '' : raw });
 });
 
 const PORT = process.env.PORT || 3000;
