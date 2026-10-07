@@ -2,29 +2,61 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
+  <!-- スマートフォンで画面が縮小表示されないようにする -->
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>問い合わせ詳細</title>
   <style>
-    body { font-family: "Hiragino Sans", "Noto Sans JP", "Meiryo", sans-serif; color: #000; background: #fff; margin: 24px; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Hiragino Sans", "Noto Sans JP", "Meiryo", sans-serif;
+      font-size: 16px; line-height: 1.6; color: #000; background: #fff; margin: 24px;
+    }
     .wrap { max-width: 640px; border: 1px solid #999; }
-    .header { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid #999; }
-    .header h1 { font-size: 18px; margin: 0; }
-    section { padding: 10px 14px; border-bottom: 1px solid #999; }
+    .header { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid #999; }
+    .header h1 { font-size: 20px; margin: 0; }
+    .header a { padding: 6px 0; }
+    section { padding: 12px 14px; border-bottom: 1px solid #999; }
     section:last-child { border-bottom: none; }
-    h2 { font-size: 15px; margin: 0 0 8px; }
+    h2 { font-size: 17px; margin: 0 0 8px; }
     dl { display: grid; grid-template-columns: 5em 1fr; gap: 4px 8px; margin: 0; }
     dt::after { content: " ："; }
-    dd { margin: 0; white-space: pre-wrap; }
-    .row { margin: 6px 0; }
-    textarea { width: 100%; box-sizing: border-box; height: 60px; }
-    .msg { padding: 8px 14px; font-weight: bold; border-bottom: 1px solid #999; }
+    dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .row { margin: 8px 0; }
+    .radio-group { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+    .radio-group label {
+      display: inline-flex; align-items: center; gap: 6px;
+      min-height: 44px; padding: 6px 14px; border: 1px solid #999; border-radius: 6px; cursor: pointer;
+    }
+    .radio-group input { width: 20px; height: 20px; margin: 0; }
+    textarea, select { font-size: 16px; }
+    textarea { width: 100%; height: 80px; padding: 6px; }
+    select { min-height: 44px; min-width: 12em; padding: 6px; }
+    button { font-size: 16px; min-height: 44px; padding: 8px 18px; cursor: pointer; }
+    button:disabled { cursor: not-allowed; }
+    .msg { padding: 10px 14px; font-weight: bold; border-bottom: 1px solid #999; }
     .msg-success { color: #1a7f37; background: #e6f4ea; }
     .msg-error { color: #c62828; background: #fdecea; }
     .priority-HIGH { color: #d00000; }
     .priority-MIDDLE { color: #000000; }
     .priority-LOW { color: #888888; }
-    .note { color: #555; font-size: 13px; }
+    .note { color: #444; font-size: 14px; }
+    .counter { font-size: 14px; color: #444; text-align: right; }
+    .counter.over { color: #c62828; font-weight: bold; }
     .history-item { margin: 0 0 8px; }
     .history-item .detail { padding-left: 1em; }
+
+    /* スマートフォン(画面幅600px以下) */
+    @media (max-width: 600px) {
+      body { margin: 0; }
+      .wrap { border: none; }
+      .header h1 { font-size: 18px; }
+      dl { grid-template-columns: 1fr; gap: 0; }
+      dt { color: #444; font-size: 14px; }
+      dt::after { content: ""; }
+      dd { margin-bottom: 8px; }
+      .radio-group label { flex: 1 1 auto; justify-content: center; }
+      select, button { width: 100%; }
+    }
   </style>
 </head>
 <body>
@@ -37,7 +69,7 @@
 
   <!-- 処理結果メッセージ -->
   <% if (flash) { %>
-    <div class="msg msg-<%= flash.type %>"><%= flash.text %></div>
+    <div class="msg msg-<%= flash.type %>" role="status"><%= flash.text %></div>
   <% } %>
 
   <% if (inquiry) { %>
@@ -60,14 +92,22 @@
       <input type="hidden" name="updated_at" value="<%= inquiry.updated_at %>">
       <div class="row">現在： [<%= statusLabels[inquiry.status] %>]</div>
       <div class="row">変更先：
-        <% nextStatusList.forEach((code, i) => { %>
-          <label><input type="radio" name="status" value="<%= code %>" <%= i === 0 ? 'checked' : '' %>> <%= statusLabels[code] %></label>
-        <% }) %>
+        <div class="radio-group">
+          <% nextStatusList.forEach((code) => { %>
+            <label><input type="radio" name="status" value="<%= code %>" <%= code === selectedStatus ? 'checked' : '' %>> <%= statusLabels[code] %></label>
+          <% }) %>
+        </div>
       </div>
-      <div class="row">コメント（任意・200字以内）<br>
-        <textarea name="comment"></textarea>
+      <div class="row">
+        <label for="comment">コメント（任意・200字以内）</label>
+        <div class="note">※コメントは保存されません（変更履歴にも残りません）。</div>
+        <textarea id="comment" name="comment" data-max="<%= commentMax %>"><%= comment %></textarea>
+        <div class="counter" id="comment-counter" aria-live="polite"></div>
       </div>
-      <button type="submit">ステータスを変更</button>
+      <button type="submit" <%= canOperate ? '' : 'disabled' %>>ステータスを変更</button>
+      <% if (operatorNote) { %>
+        <div class="row note"><%= operatorNote %></div>
+      <% } %>
     </form>
   </section>
   <% } %>
@@ -78,19 +118,22 @@
     <form method="post" action="/inquiries/<%= inquiry.id %>/assignee">
       <input type="hidden" name="updated_at" value="<%= inquiry.updated_at %>">
       <div class="row">現在： <%= assigneeName %></div>
-      <div class="row">変更先：
-        <select name="assignee_id">
-          <% if (isAdmin) { %>
-            <option value="" <%= inquiry.assignee_id == null ? 'selected' : '' %>>未割り当て</option>
+      <div class="row">
+        <label for="assignee_id">変更先：</label>
+        <select id="assignee_id" name="assignee_id">
+          <% if (showUnassignedOption) { %>
+            <option value="" <%= selectedAssignee === '' ? 'selected' : '' %>>未割り当て</option>
           <% } %>
-          <% activeUsers.forEach((u) => { %>
-            <option value="<%= u.id %>" <%= u.id === inquiry.assignee_id ? 'selected' : '' %>><%= u.name %></option>
+          <% assigneeOptions.forEach((u) => { %>
+            <option value="<%= u.id %>" <%= String(u.id) === selectedAssignee ? 'selected' : '' %>><%= u.name %></option>
           <% }) %>
         </select>
       </div>
       <button type="submit" <%= assigneeButtonDisabled ? 'disabled' : '' %>>担当者を変更</button>
       <% if (showAskAdmin) { %>
         <div class="row note">担当者の変更は管理者に依頼してください</div>
+      <% } else if (operatorNote) { %>
+        <div class="row note"><%= operatorNote %></div>
       <% } %>
     </form>
   </section>
@@ -111,5 +154,22 @@
   </section>
   <% } %>
 </div>
+
+<script>
+  // コメントの文字数を表示する(入力の目安。最終的なチェックはサーバー側で行う)
+  (function () {
+    var area = document.getElementById('comment');
+    var counter = document.getElementById('comment-counter');
+    if (!area || !counter) return;
+    var max = Number(area.getAttribute('data-max'));
+    function update() {
+      var len = Array.from(area.value).length;
+      counter.textContent = len + ' / ' + max + ' 文字' + (len > max ? '（' + (len - max) + '文字多いです）' : '');
+      counter.className = 'counter' + (len > max ? ' over' : '');
+    }
+    area.addEventListener('input', update);
+    update();
+  })();
+</script>
 </body>
 </html>
